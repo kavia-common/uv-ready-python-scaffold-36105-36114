@@ -24,10 +24,11 @@ Running this module directly:
     python -m weather.mcp_weather_server
 
 Import strategy implemented below:
-- Prefer relative import when package context is available (normal Django usage).
-- If relative import fails (common when running as a script), we compute the project
-  root (backend_server) and insert it into sys.path so that absolute imports like
-  `from weather.services import ...` succeed without installing as a package.
+- We first compute the backend_server root based on __file__ and ensure it is in sys.path.
+  This makes `import weather.services` work regardless of the current working directory
+  or invocation method (script vs. module).
+- If the module is imported as part of the weather package (e.g. via Django), standard
+  relative imports continue to function.
 """
 
 from __future__ import annotations
@@ -38,24 +39,32 @@ import sys
 import time
 from typing import Iterable, Optional
 
-# Robust import strategy for dual use (package and script)
-# We ensure that the backend_server directory is on sys.path so that
-# "weather" can be imported as a top-level package even when this file
-# is executed directly (e.g., `python mcp_weather_server.py`).
-def _ensure_backend_root_on_path() -> None:
-    # __file__ is .../backend_server/weather/mcp_weather_server.py
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    weather_dir = os.path.dirname(current_dir)                 # .../backend_server/weather
-    backend_root = os.path.dirname(weather_dir)                # .../backend_server
-    if backend_root not in sys.path:
-        sys.path.insert(0, backend_root)
+def _compute_backend_root() -> str:
+    """
+    Determine the backend root directory (the folder that contains the 'weather' package)
+    based on this file's location.
 
-# First, try relative import when package context is available
+    Layout assumption (present in this project):
+        <...>/backend_server/weather/mcp_weather_server.py
+    """
+    this_file = os.path.abspath(__file__)
+    weather_dir = os.path.dirname(this_file)       # .../backend_server/weather
+    backend_root = os.path.dirname(weather_dir)    # .../backend_server
+    return backend_root
+
+def _ensure_on_sys_path(path: str) -> None:
+    """Insert a path at the beginning of sys.path if it's not already present."""
+    if path and path not in sys.path:
+        sys.path.insert(0, path)
+
+# Always ensure backend root is importable so absolute 'weather...' imports succeed when run as a script.
+_ensure_on_sys_path(_compute_backend_root())
+
+# Attempt a relative import first (works when imported as package).
+# Fallback to absolute import (works when executed as a script from any CWD).
 try:
     from .services import WeatherQuery, MockWeatherProvider  # type: ignore
 except Exception:
-    # If relative import fails (likely when run as a script), fix sys.path and retry absolute import
-    _ensure_backend_root_on_path()
     from weather.services import WeatherQuery, MockWeatherProvider  # type: ignore
 
 
@@ -69,7 +78,7 @@ def serve_weather_stream(city: Optional[str], units: str = "metric", delay_secon
         delay_seconds: Delay between chunks to simulate progressive updates.
 
     Returns:
-        Iterable of bytes chunks. Each chunk is a JSON object plus '\\n'.
+        Iterable of bytes chunks. Each chunk is a JSON object plus '\n'.
 
     Usage example (inside a Django view):
         from django.http import StreamingHttpResponse
