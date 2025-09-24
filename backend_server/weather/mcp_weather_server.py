@@ -19,10 +19,24 @@ Notes on streaming HTTP:
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from typing import Iterable, Optional
 
-from .services import WeatherQuery, MockWeatherProvider
+# Allow running this module both:
+# - as part of the Django package (relative import), and
+# - directly via: python mcp_weather_server.py (absolute import fallback).
+try:
+    from .services import WeatherQuery, MockWeatherProvider  # type: ignore
+except ImportError:
+    # When executed directly, __package__ is None and relative import fails.
+    # Insert the backend_server directory to sys.path and try absolute import.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    backend_root = os.path.abspath(os.path.join(current_dir, os.pardir, os.pardir))
+    if backend_root not in sys.path:
+        sys.path.insert(0, backend_root)
+    from weather.services import WeatherQuery, MockWeatherProvider  # type: ignore
 
 
 # PUBLIC_INTERFACE
@@ -35,7 +49,7 @@ def serve_weather_stream(city: Optional[str], units: str = "metric", delay_secon
         delay_seconds: Delay between chunks to simulate progressive updates.
 
     Returns:
-        Iterable of bytes chunks. Each chunk is a JSON object plus '\\n'.
+        Iterable of bytes chunks. Each chunk is a JSON object plus '\n'.
 
     Usage example (inside a Django view):
         from django.http import StreamingHttpResponse
@@ -57,3 +71,15 @@ def serve_weather_stream(city: Optional[str], units: str = "metric", delay_secon
         time.sleep(delay_seconds)
 
     yield (json.dumps({"type": "mcp_trailer", "done": True}) + "\n").encode("utf-8")
+
+
+if __name__ == "__main__":
+    # If run directly, demonstrate usage by printing a short sample stream to stdout.
+    # This allows quick manual testing: python mcp_weather_server.py
+    # It will emit a few ndjson lines and exit.
+    demo_city = os.environ.get("MCP_WEATHER_CITY", "Berlin")
+    demo_units = os.environ.get("MCP_WEATHER_UNITS", "metric")
+    for chunk in serve_weather_stream(demo_city, demo_units, delay_seconds=0.05):
+        # Chunks are bytes already; write directly to stdout
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.flush()
