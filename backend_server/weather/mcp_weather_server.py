@@ -39,19 +39,23 @@ import time
 from typing import Iterable, Optional
 
 # Robust import strategy for dual use (package and script)
-# 1) Try relative import when run within the Django package.
-# 2) On ImportError (e.g., when executed directly), ensure backend_server is on sys.path
-#    and retry using absolute import.
-try:
-    from .services import WeatherQuery, MockWeatherProvider  # type: ignore
-except ImportError:
-    # Compute backend_server root: <...>/backend_server
+# We ensure that the backend_server directory is on sys.path so that
+# "weather" can be imported as a top-level package even when this file
+# is executed directly (e.g., `python mcp_weather_server.py`).
+def _ensure_backend_root_on_path() -> None:
+    # __file__ is .../backend_server/weather/mcp_weather_server.py
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    backend_root = os.path.abspath(os.path.join(current_dir, os.pardir, os.pardir))
-    # Add backend_server to sys.path so "weather" is importable as a top-level package.
+    weather_dir = os.path.dirname(current_dir)                 # .../backend_server/weather
+    backend_root = os.path.dirname(weather_dir)                # .../backend_server
     if backend_root not in sys.path:
         sys.path.insert(0, backend_root)
-    # Now import using absolute path which works under standard Python execution
+
+# First, try relative import when package context is available
+try:
+    from .services import WeatherQuery, MockWeatherProvider  # type: ignore
+except Exception:
+    # If relative import fails (likely when run as a script), fix sys.path and retry absolute import
+    _ensure_backend_root_on_path()
     from weather.services import WeatherQuery, MockWeatherProvider  # type: ignore
 
 
